@@ -192,7 +192,7 @@ namespace Foam
 
             public:
                 //- Runtime type information
-                TypeName("forces");
+                TypeName("forcesField");
 
                 // Constructors
 
