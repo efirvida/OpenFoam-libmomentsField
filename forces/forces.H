@@ -28,17 +28,17 @@ Description
     Calculates the forces and moments by integrating the pressure and
     skin-friction forces over a given list of patches.
 
-    Member function forces::write() calculates the forces/moments and
-    writes the forces/moments fields.
+    Member function forces::write() store and write volume field 
+    representations of forces and moments.
 
     Example of function object specification:
     \verbatim
-    forces1
+    forceField_1
     {
-        type        forces;
-        libs        ("libforcesField.so");
+        type          forcesField;
+        libs          ("libforcesField.so");
         ...
-        patches     (walls);
+        patches       (<patch list>);
     }
     \endverbatim
 
