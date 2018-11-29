@@ -90,7 +90,6 @@ SourceFiles
 #include "coordinateSystem.H"
 #include "volFieldsFwd.H"
 #include "HashSet.H"
-
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
 namespace Foam
