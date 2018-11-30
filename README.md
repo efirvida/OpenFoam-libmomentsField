@@ -38,10 +38,11 @@ Note:
 or
 
 ```
-    coordinateSystem
+    origin  (0 0 0);
+    coordinateRotation
     {
-        origin  (0 0 0);
-        e3      (0 0 1);
-        e1      (1 0 0);
-    }
+        type    axesRotation;
+        e1  (1 0 0);
+        e2  (0 1 0);
+    } 
 ```
