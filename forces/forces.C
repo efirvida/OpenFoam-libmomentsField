@@ -101,15 +101,15 @@ void Foam::functionObjects::forces::resetFields()
 
     volVectorField &force =
         const_cast<volVectorField &>(
-            lookupObject<volVectorField>("force"));
+            lookupObject<volVectorField>("Force"));
 
-    force == dimensionedVector("force", force.dimensions(), Zero);
+    force == dimensionedVector("Force", force.dimensions(), Zero);
 
     volVectorField &moment =
         const_cast<volVectorField &>(
-            lookupObject<volVectorField>("moment"));
+            lookupObject<volVectorField>("Moment"));
 
-    moment == dimensionedVector("moment", moment.dimensions(), Zero);
+    moment == dimensionedVector("Moment", moment.dimensions(), Zero);
 }
 
 
@@ -280,14 +280,14 @@ void Foam::functionObjects::forces::addToFields(
 {
     volVectorField &force =
         const_cast<volVectorField &>(
-            lookupObject<volVectorField>("force"));
+            lookupObject<volVectorField>("Force"));
 
     vectorField &pf = force.boundaryFieldRef()[patchi];
     pf += fN + fT + fP;
 
     volVectorField &moment =
         const_cast<volVectorField &>(
-            lookupObject<volVectorField>("moment"));
+            lookupObject<volVectorField>("Moment"));
 
     vectorField &pm = moment.boundaryFieldRef()[patchi];
     pm += Md;
@@ -303,11 +303,11 @@ void Foam::functionObjects::forces::addToFields(
 {
     volVectorField &force =
         const_cast<volVectorField &>(
-            lookupObject<volVectorField>("force"));
+            lookupObject<volVectorField>("Force"));
 
     volVectorField &moment =
         const_cast<volVectorField &>(
-            lookupObject<volVectorField>("moment"));
+            lookupObject<volVectorField>("Moment"));
 
     forAll(cellIDs, i)
     {
@@ -381,7 +381,121 @@ Foam::functionObjects::forces::~forces()
 
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
-bool Foam::functionObjects::forces::read(const dictionary& dict)
+void Foam::functionObjects::forces::calcForcesMoment()
+{
+    initialise();
+    resetFields();
+
+    force_[0] = Zero;
+    force_[1] = Zero;
+    force_[2] = Zero;
+
+    moment_[0] = Zero;
+    moment_[1] = Zero;
+    moment_[2] = Zero;
+
+    if (directForceDensity_)
+    {
+        const volVectorField& fD = obr_.lookupObject<volVectorField>(fDName_);
+
+        const surfaceVectorField::Boundary& Sfb = mesh_.Sf().boundaryField();
+
+        forAllConstIter(labelHashSet, patchSet_, iter)
+        {
+            label patchi = iter.key();
+
+            vectorField Md(mesh_.C().boundaryField()[patchi] - coordSys_.origin());
+
+            scalarField sA(mag(Sfb[patchi]));
+
+            // Normal force = surfaceUnitNormal*(surfaceNormal & forceDensity)
+            vectorField fN(Sfb[patchi]/sA*(Sfb[patchi] & fD.boundaryField()[patchi]));
+
+            // Tangential force (total force minus normal fN)
+            vectorField fT(sA*fD.boundaryField()[patchi] - fN);
+
+            //- Porous force
+            vectorField fP(Md.size(), Zero);
+
+            addToFields(patchi, Md, fN, fT, fP);
+
+        }
+    }
+    else
+    {
+        const volScalarField& p = obr_.lookupObject<volScalarField>(pName_);
+
+        const surfaceVectorField::Boundary& Sfb = mesh_.Sf().boundaryField();
+
+        tmp<volSymmTensorField> tdevRhoReff = devRhoReff();
+        const volSymmTensorField::Boundary& devRhoReffb = tdevRhoReff().boundaryField();
+
+        // Scale pRef by density for incompressible simulations
+        scalar pRef = pRef_/rho(p);
+
+        forAllConstIter(labelHashSet, patchSet_, iter)
+        {
+            label patchi = iter.key();
+
+            vectorField Md(mesh_.C().boundaryField()[patchi] - coordSys_.origin());
+
+            vectorField fN(rho(p)*Sfb[patchi]*(p.boundaryField()[patchi] - pRef));
+
+            vectorField fT(Sfb[patchi] & devRhoReffb[patchi]);
+
+            vectorField fP(Md.size(), Zero);
+
+            addToFields(patchi, Md, fN, fT, fP);
+
+        }
+    }
+
+    if (porosity_)
+    {
+        const volVectorField& U = obr_.lookupObject<volVectorField>(UName_);
+        const volScalarField rho(this->rho());
+        const volScalarField mu(this->mu());
+
+        const HashTable<const porosityModel*> models = obr_.lookupClass<porosityModel>();
+
+        if (models.empty())
+        {
+            WarningInFunction
+                << "Porosity effects requested, but no porosity models found "
+                << "in the database"
+                << endl;
+        }
+
+        forAllConstIter(HashTable<const porosityModel*>, models, iter)
+        {
+            // non-const access required if mesh is changing
+            porosityModel& pm = const_cast<porosityModel&>(*iter());
+
+            vectorField fPTot(pm.force(U, rho, mu));
+
+            const labelList& cellZoneIDs = pm.cellZoneIDs();
+
+            forAll(cellZoneIDs, i)
+            {
+                label zoneI = cellZoneIDs[i];
+                const cellZone& cZone = mesh_.cellZones()[zoneI];
+
+                const vectorField d(mesh_.C(), cZone);
+                const vectorField fP(fPTot, cZone);
+                const vectorField Md(d - coordSys_.origin());
+
+                const vectorField fDummy(Md.size(), Zero);
+
+                addToFields(cZone, Md, fDummy, fDummy, fP);
+
+            }
+        }
+    }
+
+}
+
+
+bool Foam::functionObjects::forces::read(const dictionary &dict)
 {
     fvMeshFunctionObject::read(dict);
 
@@ -391,7 +505,7 @@ bool Foam::functionObjects::forces::read(const dictionary& dict)
 
     directForceDensity_ = dict.lookupOrDefault("directForceDensity", false);
 
-    const polyBoundaryMesh& pbm = mesh_.boundaryMesh();
+    const polyBoundaryMesh &pbm = mesh_.boundaryMesh();
 
     patchSet_ = pbm.patchSet(wordReList(dict.lookup("patches")));
 
@@ -437,178 +551,34 @@ bool Foam::functionObjects::forces::read(const dictionary& dict)
         Info << "    Not including porosity effects" << endl;
     }
 
-
     Info << "    Forces and Moments Fields will be written" << endl;
 
     volVectorField *forcePtr(
         new volVectorField(
             IOobject(
-                "force",
+                "Force",
                 time_.timeName(),
                 mesh_,
                 IOobject::NO_READ,
                 IOobject::NO_WRITE),
             mesh_,
-            dimensionedVector("force", dimForce, Zero)));
+            dimensionedVector("Force", dimForce, Zero)));
 
     mesh_.objectRegistry::store(forcePtr);
 
     volVectorField *momentPtr(
         new volVectorField(
             IOobject(
-                "moment",
+                "Moment",
                 time_.timeName(),
                 mesh_,
                 IOobject::NO_READ,
                 IOobject::NO_WRITE),
             mesh_,
-            dimensionedVector("moment", dimForce * dimLength, Zero)));
+            dimensionedVector("Moment", dimForce * dimLength, Zero)));
 
     mesh_.objectRegistry::store(momentPtr);
 
-    return true;
-}
-
-
-void Foam::functionObjects::forces::calcForcesMoment()
-{
-    initialise();
-    resetFields();
-
-    force_[0] = Zero;
-    force_[1] = Zero;
-    force_[2] = Zero;
-
-    moment_[0] = Zero;
-    moment_[1] = Zero;
-    moment_[2] = Zero;
-
-    if (directForceDensity_)
-    {
-        const volVectorField& fD = obr_.lookupObject<volVectorField>(fDName_);
-
-        const surfaceVectorField::Boundary& Sfb =
-            mesh_.Sf().boundaryField();
-
-        forAllConstIter(labelHashSet, patchSet_, iter)
-        {
-            label patchi = iter.key();
-
-            vectorField Md
-            (
-                mesh_.C().boundaryField()[patchi] - coordSys_.origin()
-            );
-
-            scalarField sA(mag(Sfb[patchi]));
-
-            // Normal force = surfaceUnitNormal*(surfaceNormal & forceDensity)
-            vectorField fN
-            (
-                Sfb[patchi]/sA
-               *(
-                    Sfb[patchi] & fD.boundaryField()[patchi]
-                )
-            );
-
-            // Tangential force (total force minus normal fN)
-            vectorField fT(sA*fD.boundaryField()[patchi] - fN);
-
-            //- Porous force
-            vectorField fP(Md.size(), Zero);
-
-            addToFields(patchi, Md, fN, fT, fP);
-
-        }
-    }
-    else
-    {
-        const volScalarField& p = obr_.lookupObject<volScalarField>(pName_);
-
-        const surfaceVectorField::Boundary& Sfb =
-            mesh_.Sf().boundaryField();
-
-        tmp<volSymmTensorField> tdevRhoReff = devRhoReff();
-        const volSymmTensorField::Boundary& devRhoReffb
-            = tdevRhoReff().boundaryField();
-
-        // Scale pRef by density for incompressible simulations
-        scalar pRef = pRef_/rho(p);
-
-        forAllConstIter(labelHashSet, patchSet_, iter)
-        {
-            label patchi = iter.key();
-
-            vectorField Md
-            (
-                mesh_.C().boundaryField()[patchi] - coordSys_.origin()
-            );
-
-            vectorField fN
-            (
-                rho(p)*Sfb[patchi]*(p.boundaryField()[patchi] - pRef)
-            );
-
-            vectorField fT(Sfb[patchi] & devRhoReffb[patchi]);
-
-            vectorField fP(Md.size(), Zero);
-
-            addToFields(patchi, Md, fN, fT, fP);
-
-        }
-    }
-
-    if (porosity_)
-    {
-        const volVectorField& U = obr_.lookupObject<volVectorField>(UName_);
-        const volScalarField rho(this->rho());
-        const volScalarField mu(this->mu());
-
-        const HashTable<const porosityModel*> models =
-            obr_.lookupClass<porosityModel>();
-
-        if (models.empty())
-        {
-            WarningInFunction
-                << "Porosity effects requested, but no porosity models found "
-                << "in the database"
-                << endl;
-        }
-
-        forAllConstIter(HashTable<const porosityModel*>, models, iter)
-        {
-            // non-const access required if mesh is changing
-            porosityModel& pm = const_cast<porosityModel&>(*iter());
-
-            vectorField fPTot(pm.force(U, rho, mu));
-
-            const labelList& cellZoneIDs = pm.cellZoneIDs();
-
-            forAll(cellZoneIDs, i)
-            {
-                label zoneI = cellZoneIDs[i];
-                const cellZone& cZone = mesh_.cellZones()[zoneI];
-
-                const vectorField d(mesh_.C(), cZone);
-                const vectorField fP(fPTot, cZone);
-                const vectorField Md(d - coordSys_.origin());
-
-                const vectorField fDummy(Md.size(), Zero);
-
-                addToFields(cZone, Md, fDummy, fDummy, fP);
-
-            }
-        }
-    }
-
-    Pstream::listCombineGather(force_, plusEqOp<vectorField>());
-    Pstream::listCombineGather(moment_, plusEqOp<vectorField>());
-    Pstream::listCombineScatter(force_);
-    Pstream::listCombineScatter(moment_);
-}
-
-
-bool Foam::functionObjects::forces::execute()
-{
     return true;
 }
 
@@ -617,11 +587,15 @@ bool Foam::functionObjects::forces::write()
 {
     calcForcesMoment();
 
-    lookupObject<volVectorField>("force").write();
-    lookupObject<volVectorField>("moment").write();
+    lookupObject<volVectorField>("Force").write();
+    lookupObject<volVectorField>("Moment").write();
 
     return true;
 }
 
 
+bool Foam::functionObjects::forces::execute()
+{
+    return true;
+}
 // ************************************************************************* //

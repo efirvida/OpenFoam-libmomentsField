@@ -208,10 +208,9 @@ namespace Foam
                     const objectRegistry &obr,
                     const dictionary &dict,
                     const bool readFields = true);
+
                 //- Destructor
                 virtual ~forces();
-
-                // Member Functions
 
                 //- Read the forces data
                 virtual bool read(const dictionary &);
