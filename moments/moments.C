@@ -495,9 +495,16 @@ bool Foam::functionObjects::moments::read(const dictionary &dict)
         rhoName_ = dict.lookupOrDefault<word>("rho", "rho");
 
         // Reference density needed for incompressible calculations
-        if (rhoName_ == "rhoInf")
+        if (obr_.foundObject<transportModel>("transportProperties"))
         {
-            dict.lookup("rhoInf") >> rhoRef_;
+            rhoName_ = "rhoInf";
+            const dictionary &transportProperties =
+                obr_.lookupObject<dictionary>("transportProperties");
+
+            dimensionedScalar rhoRef_(
+                "rho",
+                dimDensity,
+                transportProperties.lookup("rho"));
         }
 
         // Reference pressure, 0 by default
