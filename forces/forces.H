@@ -108,10 +108,6 @@ namespace Foam
                 //- Pressure, viscous and porous force per bin
                 List<Field<vector>> force_;
 
-                //- Pressure, viscous and porous moment per bin
-                List<Field<vector>> moment_;
-
-
                 //- Patches to integrate forces over
                 labelHashSet patchSet_;
 
@@ -170,7 +166,6 @@ namespace Foam
                 //- Add patch contributions to force and moment fields
                 void addToFields(
                     const label patchi,
-                    const vectorField &Md,
                     const vectorField &fN,
                     const vectorField &fT,
                     const vectorField &fP);
@@ -178,7 +173,6 @@ namespace Foam
                 //- Add cell contributions to force and moment fields
                 void addToFields(
                     const labelList &cellIDs,
-                    const vectorField &Md,
                     const vectorField &fN,
                     const vectorField &fT,
                     const vectorField &fP);

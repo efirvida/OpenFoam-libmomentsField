@@ -95,21 +95,12 @@ void Foam::functionObjects::forces::resetFields()
     force_[1] = Zero;
     force_[2] = Zero;
 
-    moment_[0] = Zero;
-    moment_[1] = Zero;
-    moment_[2] = Zero;
-
     volVectorField &force =
         const_cast<volVectorField &>(
             lookupObject<volVectorField>("Force"));
 
     force == dimensionedVector("Force", force.dimensions(), Zero);
 
-    volVectorField &moment =
-        const_cast<volVectorField &>(
-            lookupObject<volVectorField>("Moment"));
-
-    moment == dimensionedVector("Moment", moment.dimensions(), Zero);
 }
 
 
@@ -273,7 +264,6 @@ Foam::scalar Foam::functionObjects::forces::rho(const volScalarField& p) const
 
 void Foam::functionObjects::forces::addToFields(
     const label patchi,
-    const vectorField &Md,
     const vectorField &fN,
     const vectorField &fT,
     const vectorField &fP)
@@ -284,19 +274,11 @@ void Foam::functionObjects::forces::addToFields(
 
     vectorField &pf = force.boundaryFieldRef()[patchi];
     pf += fN + fT + fP;
-
-    volVectorField &moment =
-        const_cast<volVectorField &>(
-            lookupObject<volVectorField>("Moment"));
-
-    vectorField &pm = moment.boundaryFieldRef()[patchi];
-    pm += Md;
 }
 
 
 void Foam::functionObjects::forces::addToFields(
     const labelList &cellIDs,
-    const vectorField &Md,
     const vectorField &fN,
     const vectorField &fT,
     const vectorField &fP)
@@ -305,15 +287,10 @@ void Foam::functionObjects::forces::addToFields(
         const_cast<volVectorField &>(
             lookupObject<volVectorField>("Force"));
 
-    volVectorField &moment =
-        const_cast<volVectorField &>(
-            lookupObject<volVectorField>("Moment"));
-
     forAll(cellIDs, i)
     {
         label celli = cellIDs[i];
         force[celli] += fN[i] + fT[i] + fP[i];
-        moment[celli] += Md[i];
     }
 }
 
@@ -326,7 +303,6 @@ Foam::functionObjects::forces::forces(
     bool readFields)
     : fvMeshFunctionObject(name, runTime, dict),
       force_(3),
-      moment_(3),
       patchSet_(),
       pName_(word::null),
       UName_(word::null),
@@ -335,8 +311,6 @@ Foam::functionObjects::forces::forces(
       fDName_(""),
       rhoRef_(vGreat),
       pRef_(0),
-      coordSys_(),
-      localSystem_(false),
       porosity_(false),
       initialised_(false)
 {
@@ -354,7 +328,6 @@ Foam::functionObjects::forces::forces(
     bool readFields)
     : fvMeshFunctionObject(name, obr, dict),
       force_(3),
-      moment_(3),
       patchSet_(),
       pName_(word::null),
       UName_(word::null),
@@ -363,8 +336,6 @@ Foam::functionObjects::forces::forces(
       fDName_(""),
       rhoRef_(vGreat),
       pRef_(0),
-      coordSys_(),
-      localSystem_(false),
       porosity_(false),
       initialised_(false)
 {
@@ -390,10 +361,6 @@ void Foam::functionObjects::forces::calcForcesMoment()
     force_[1] = Zero;
     force_[2] = Zero;
 
-    moment_[0] = Zero;
-    moment_[1] = Zero;
-    moment_[2] = Zero;
-
     if (directForceDensity_)
     {
         const volVectorField& fD = obr_.lookupObject<volVectorField>(fDName_);
@@ -404,8 +371,6 @@ void Foam::functionObjects::forces::calcForcesMoment()
         {
             label patchi = iter.key();
 
-            vectorField Md(mesh_.C().boundaryField()[patchi] - coordSys_.origin());
-
             scalarField sA(mag(Sfb[patchi]));
 
             // Normal force = surfaceUnitNormal*(surfaceNormal & forceDensity)
@@ -415,9 +380,9 @@ void Foam::functionObjects::forces::calcForcesMoment()
             vectorField fT(sA*fD.boundaryField()[patchi] - fN);
 
             //- Porous force
-            vectorField fP(Md.size(), Zero);
+            vectorField fP(fT.size(), Zero);
 
-            addToFields(patchi, Md, fN, fT, fP);
+            addToFields(patchi, fN, fT, fP);
 
         }
     }
@@ -437,15 +402,13 @@ void Foam::functionObjects::forces::calcForcesMoment()
         {
             label patchi = iter.key();
 
-            vectorField Md(mesh_.C().boundaryField()[patchi] - coordSys_.origin());
-
             vectorField fN(rho(p)*Sfb[patchi]*(p.boundaryField()[patchi] - pRef));
 
             vectorField fT(Sfb[patchi] & devRhoReffb[patchi]);
 
-            vectorField fP(Md.size(), Zero);
+            vectorField fP(fT.size(), Zero);
 
-            addToFields(patchi, Md, fN, fT, fP);
+            addToFields(patchi, fN, fT, fP);
 
         }
     }
@@ -482,11 +445,10 @@ void Foam::functionObjects::forces::calcForcesMoment()
 
                 const vectorField d(mesh_.C(), cZone);
                 const vectorField fP(fPTot, cZone);
-                const vectorField Md(d - coordSys_.origin());
 
-                const vectorField fDummy(Md.size(), Zero);
+                const vectorField fDummy(fP.size(), Zero);
 
-                addToFields(cZone, Md, fDummy, fDummy, fP);
+                addToFields(cZone, fDummy, fDummy, fP);
 
             }
         }
@@ -531,16 +493,6 @@ bool Foam::functionObjects::forces::read(const dictionary &dict)
         pRef_ = dict.lookupOrDefault<scalar>("pRef", 0.0);
     }
 
-    coordSys_.clear();
-
-    // Centre of rotation for moment calculations
-    // specified directly, from coordinate system, or implicitly (0 0 0)
-    if (!dict.readIfPresent<point>("CofR", coordSys_.origin()))
-    {
-        coordSys_ = coordinateSystem(obr_, dict);
-        localSystem_ = true;
-    }
-
     dict.readIfPresent("porosity", porosity_);
     if (porosity_)
     {
@@ -551,7 +503,7 @@ bool Foam::functionObjects::forces::read(const dictionary &dict)
         Info << "    Not including porosity effects" << endl;
     }
 
-    Info << "    Forces and Moments Fields will be written" << endl;
+    Info << "    Force field will be written\n" << endl;
 
     volVectorField *forcePtr(
         new volVectorField(
@@ -566,19 +518,6 @@ bool Foam::functionObjects::forces::read(const dictionary &dict)
 
     mesh_.objectRegistry::store(forcePtr);
 
-    volVectorField *momentPtr(
-        new volVectorField(
-            IOobject(
-                "Moment",
-                time_.timeName(),
-                mesh_,
-                IOobject::NO_READ,
-                IOobject::NO_WRITE),
-            mesh_,
-            dimensionedVector("Moment", dimForce * dimLength, Zero)));
-
-    mesh_.objectRegistry::store(momentPtr);
-
     return true;
 }
 
@@ -588,7 +527,6 @@ bool Foam::functionObjects::forces::write()
     calcForcesMoment();
 
     lookupObject<volVectorField>("Force").write();
-    lookupObject<volVectorField>("Moment").write();
 
     return true;
 }
