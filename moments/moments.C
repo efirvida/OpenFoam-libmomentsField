@@ -23,7 +23,7 @@ License
 
 \*---------------------------------------------------------------------------*/
 
-#include "forces.H"
+#include "moments.H"
 #include "fvcGrad.H"
 #include "porosityModel.H"
 #include "turbulentTransportModel.H"
@@ -36,14 +36,14 @@ namespace Foam
 {
     namespace functionObjects
     {
-        defineTypeNameAndDebug(forces, 0);
-        addToRunTimeSelectionTable(functionObject, forces, dictionary);
+        defineTypeNameAndDebug(moments, 0);
+        addToRunTimeSelectionTable(functionObject, moments, dictionary);
     }
 }
 
 
 // * * * * * * * * * * * * Protected Member Functions  * * * * * * * * * * * //
-void Foam::functionObjects::forces::initialise()
+void Foam::functionObjects::moments::initialise()
 {
     if (initialised_)
     {
@@ -89,23 +89,22 @@ void Foam::functionObjects::forces::initialise()
 }
 
 
-void Foam::functionObjects::forces::resetFields()
+void Foam::functionObjects::moments::resetFields()
 {
-    force_[0] = Zero;
-    force_[1] = Zero;
-    force_[2] = Zero;
+    moment_[0] = Zero;
+    moment_[1] = Zero;
+    moment_[2] = Zero;
 
-    volVectorField &force =
+    volVectorField &moment =
         const_cast<volVectorField &>(
-            lookupObject<volVectorField>("Force"));
+            lookupObject<volVectorField>("Moment"));
 
-    force == dimensionedVector("Force", force.dimensions(), Zero);
-
+    moment == dimensionedVector("Moment", moment.dimensions(), Zero);
 }
 
 
 Foam::tmp<Foam::volSymmTensorField>
-Foam::functionObjects::forces::devRhoReff() const
+Foam::functionObjects::moments::devRhoReff() const
 {
     typedef compressible::turbulenceModel cmpTurbModel;
     typedef incompressible::turbulenceModel icoTurbModel;
@@ -172,7 +171,7 @@ Foam::functionObjects::forces::devRhoReff() const
 }
 
 
-Foam::tmp<Foam::volScalarField> Foam::functionObjects::forces::mu() const
+Foam::tmp<Foam::volScalarField> Foam::functionObjects::moments::mu() const
 {
     if (obr_.foundObject<fluidThermo>(basicThermo::dictName))
     {
@@ -216,7 +215,7 @@ Foam::tmp<Foam::volScalarField> Foam::functionObjects::forces::mu() const
 }
 
 
-Foam::tmp<Foam::volScalarField> Foam::functionObjects::forces::rho() const
+Foam::tmp<Foam::volScalarField> Foam::functionObjects::moments::rho() const
 {
     if (rhoName_ == "rhoInf")
     {
@@ -242,7 +241,7 @@ Foam::tmp<Foam::volScalarField> Foam::functionObjects::forces::rho() const
 }
 
 
-Foam::scalar Foam::functionObjects::forces::rho(const volScalarField& p) const
+Foam::scalar Foam::functionObjects::moments::rho(const volScalarField& p) const
 {
     if (p.dimensions() == dimPressure)
     {
@@ -262,47 +261,50 @@ Foam::scalar Foam::functionObjects::forces::rho(const volScalarField& p) const
 }
 
 
-void Foam::functionObjects::forces::addToFields(
+void Foam::functionObjects::moments::addToFields(
     const label patchi,
+    const vectorField &Md,
     const vectorField &fN,
     const vectorField &fT,
     const vectorField &fP)
 {
-    volVectorField &force =
+    volVectorField &moment =
         const_cast<volVectorField &>(
-            lookupObject<volVectorField>("Force"));
+            lookupObject<volVectorField>("Moment"));
 
-    vectorField &pf = force.boundaryFieldRef()[patchi];
-    pf += fN + fT + fP;
+    vectorField &pm = moment.boundaryFieldRef()[patchi];
+    pm += Md;
 }
 
 
-void Foam::functionObjects::forces::addToFields(
+void Foam::functionObjects::moments::addToFields(
     const labelList &cellIDs,
+    const vectorField &Md,
     const vectorField &fN,
     const vectorField &fT,
     const vectorField &fP)
 {
-    volVectorField &force =
+
+    volVectorField &moment =
         const_cast<volVectorField &>(
-            lookupObject<volVectorField>("Force"));
+            lookupObject<volVectorField>("Moment"));
 
     forAll(cellIDs, i)
     {
         label celli = cellIDs[i];
-        force[celli] += fN[i] + fT[i] + fP[i];
+        moment[celli] += Md[i];
     }
 }
 
 
 // * * * * * * * * * * * * * * * * Constructors  * * * * * * * * * * * * * * //
-Foam::functionObjects::forces::forces(
+Foam::functionObjects::moments::moments(
     const word &name,
     const Time &runTime,
     const dictionary &dict,
     bool readFields)
     : fvMeshFunctionObject(name, runTime, dict),
-      force_(3),
+      moment_(3),
       patchSet_(),
       pName_(word::null),
       UName_(word::null),
@@ -311,6 +313,8 @@ Foam::functionObjects::forces::forces(
       fDName_(""),
       rhoRef_(vGreat),
       pRef_(0),
+      coordSys_(),
+      localSystem_(false),
       porosity_(false),
       initialised_(false)
 {
@@ -321,13 +325,13 @@ Foam::functionObjects::forces::forces(
 }
 
 
-Foam::functionObjects::forces::forces(
+Foam::functionObjects::moments::moments(
     const word &name,
     const objectRegistry &obr,
     const dictionary &dict,
     bool readFields)
     : fvMeshFunctionObject(name, obr, dict),
-      force_(3),
+      moment_(3),
       patchSet_(),
       pName_(word::null),
       UName_(word::null),
@@ -336,6 +340,8 @@ Foam::functionObjects::forces::forces(
       fDName_(""),
       rhoRef_(vGreat),
       pRef_(0),
+      coordSys_(),
+      localSystem_(false),
       porosity_(false),
       initialised_(false)
 {
@@ -347,19 +353,19 @@ Foam::functionObjects::forces::forces(
 
 
 // * * * * * * * * * * * * * * * * Destructor  * * * * * * * * * * * * * * * //
-Foam::functionObjects::forces::~forces()
+Foam::functionObjects::moments::~moments()
 {}
 
 
 // * * * * * * * * * * * * * * * Member Functions  * * * * * * * * * * * * * //
-void Foam::functionObjects::forces::calcForcesMoment()
+void Foam::functionObjects::moments::calcForcesMoment()
 {
     initialise();
     resetFields();
 
-    force_[0] = Zero;
-    force_[1] = Zero;
-    force_[2] = Zero;
+    moment_[0] = Zero;
+    moment_[1] = Zero;
+    moment_[2] = Zero;
 
     if (directForceDensity_)
     {
@@ -371,6 +377,8 @@ void Foam::functionObjects::forces::calcForcesMoment()
         {
             label patchi = iter.key();
 
+            vectorField Md(mesh_.C().boundaryField()[patchi] - coordSys_.origin());
+
             scalarField sA(mag(Sfb[patchi]));
 
             // Normal force = surfaceUnitNormal*(surfaceNormal & forceDensity)
@@ -380,9 +388,9 @@ void Foam::functionObjects::forces::calcForcesMoment()
             vectorField fT(sA*fD.boundaryField()[patchi] - fN);
 
             //- Porous force
-            vectorField fP(fT.size(), Zero);
+            vectorField fP(Md.size(), Zero);
 
-            addToFields(patchi, fN, fT, fP);
+            addToFields(patchi, Md, fN, fT, fP);
 
         }
     }
@@ -402,13 +410,15 @@ void Foam::functionObjects::forces::calcForcesMoment()
         {
             label patchi = iter.key();
 
+            vectorField Md(mesh_.C().boundaryField()[patchi] - coordSys_.origin());
+
             vectorField fN(rho(p)*Sfb[patchi]*(p.boundaryField()[patchi] - pRef));
 
             vectorField fT(Sfb[patchi] & devRhoReffb[patchi]);
 
-            vectorField fP(fT.size(), Zero);
+            vectorField fP(Md.size(), Zero);
 
-            addToFields(patchi, fN, fT, fP);
+            addToFields(patchi, Md, fN, fT, fP);
 
         }
     }
@@ -445,10 +455,11 @@ void Foam::functionObjects::forces::calcForcesMoment()
 
                 const vectorField d(mesh_.C(), cZone);
                 const vectorField fP(fPTot, cZone);
+                const vectorField Md(d - coordSys_.origin());
 
-                const vectorField fDummy(fP.size(), Zero);
+                const vectorField fDummy(Md.size(), Zero);
 
-                addToFields(cZone, fDummy, fDummy, fP);
+                addToFields(cZone, Md, fDummy, fDummy, fP);
 
             }
         }
@@ -457,13 +468,13 @@ void Foam::functionObjects::forces::calcForcesMoment()
 }
 
 
-bool Foam::functionObjects::forces::read(const dictionary &dict)
+bool Foam::functionObjects::moments::read(const dictionary &dict)
 {
     fvMeshFunctionObject::read(dict);
 
     initialised_ = false;
 
-    Info << "\nForces: " << nl;
+    Info << "\nMoments: " << nl;
 
     directForceDensity_ = dict.lookupOrDefault("directForceDensity", false);
 
@@ -493,6 +504,16 @@ bool Foam::functionObjects::forces::read(const dictionary &dict)
         pRef_ = dict.lookupOrDefault<scalar>("pRef", 0.0);
     }
 
+    coordSys_.clear();
+
+    // Centre of rotation for moment calculations
+    // specified directly, from coordinate system, or implicitly (0 0 0)
+    if (!dict.readIfPresent<point>("CofR", coordSys_.origin()))
+    {
+        coordSys_ = coordinateSystem(obr_, dict);
+        localSystem_ = true;
+    }
+
     dict.readIfPresent("porosity", porosity_);
     if (porosity_)
     {
@@ -503,36 +524,36 @@ bool Foam::functionObjects::forces::read(const dictionary &dict)
         Info << "    Not including porosity effects" << endl;
     }
 
-    Info << "    Force field will be written\n" << endl;
+    Info << "    Moments Field will be written\n" << endl;
 
-    volVectorField *forcePtr(
+    volVectorField *momentPtr(
         new volVectorField(
             IOobject(
-                "Force",
+                "Moment",
                 time_.timeName(),
                 mesh_,
                 IOobject::NO_READ,
                 IOobject::NO_WRITE),
             mesh_,
-            dimensionedVector("Force", dimForce, Zero)));
+            dimensionedVector("Moment", dimForce * dimLength, Zero)));
 
-    mesh_.objectRegistry::store(forcePtr);
+    mesh_.objectRegistry::store(momentPtr);
 
     return true;
 }
 
 
-bool Foam::functionObjects::forces::write()
+bool Foam::functionObjects::moments::write()
 {
     calcForcesMoment();
 
-    lookupObject<volVectorField>("Force").write();
+    lookupObject<volVectorField>("Moment").write();
 
     return true;
 }
 
 
-bool Foam::functionObjects::forces::execute()
+bool Foam::functionObjects::moments::execute()
 {
     return true;
 }

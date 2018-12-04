@@ -1,3 +1,3 @@
-forces/forces.C
+moments/moments.C
 
-LIB = $(FOAM_USER_LIBBIN)/libforcesField
+LIB = $(FOAM_USER_LIBBIN)/libmomentsField

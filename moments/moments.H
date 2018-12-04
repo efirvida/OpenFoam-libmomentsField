@@ -79,12 +79,12 @@ Note
     \endverbatim
 
 SourceFiles
-    forces.C
+    moments.C
 
 \*---------------------------------------------------------------------------*/
 
-#ifndef functionObjects_forces_H
-#define functionObjects_forces_H
+#ifndef functionObjects_moments_H
+#define functionObjects_moments_H
 
 #include "fvMeshFunctionObject.H"
 #include "coordinateSystem.H"
@@ -101,12 +101,13 @@ namespace Foam
                                 Class forces Declaration
         \*---------------------------------------------------------------------------*/
 
-        class forces: public fvMeshFunctionObject
+        class moments: public fvMeshFunctionObject
         {
             protected:
 
-                //- Pressure, viscous and porous force per bin
-                List<Field<vector>> force_;
+                //- Pressure, viscous and porous moment per bin
+                List<Field<vector>> moment_;
+
 
                 //- Patches to integrate forces over
                 labelHashSet patchSet_;
@@ -166,6 +167,7 @@ namespace Foam
                 //- Add patch contributions to force and moment fields
                 void addToFields(
                     const label patchi,
+                    const vectorField &Md,
                     const vectorField &fN,
                     const vectorField &fT,
                     const vectorField &fP);
@@ -173,38 +175,33 @@ namespace Foam
                 //- Add cell contributions to force and moment fields
                 void addToFields(
                     const labelList &cellIDs,
+                    const vectorField &Md,
                     const vectorField &fN,
                     const vectorField &fT,
                     const vectorField &fP);
 
-                //- Disallow default bitwise copy construct
-                forces(const forces &);
-
-                //- Disallow default bitwise assignment
-                void operator=(const forces &);
-
             public:
                 //- Runtime type information
-                TypeName("forcesField");
+                TypeName("momentsField");
 
                 // Constructors
 
                 //- Construct from Time and dictionary
-                forces(
+                moments(
                     const word &name,
                     const Time &runTime,
                     const dictionary &dict,
                     const bool readFields = true);
 
                 //- Construct from objectRegistry and dictionary
-                forces(
+                moments(
                     const word &name,
                     const objectRegistry &obr,
                     const dictionary &dict,
                     const bool readFields = true);
 
                 //- Destructor
-                virtual ~forces();
+                virtual ~moments();
 
                 //- Read the forces data
                 virtual bool read(const dictionary &);
